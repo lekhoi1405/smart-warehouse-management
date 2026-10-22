@@ -1,0 +1,268 @@
+﻿
+================ FILE: application-local.properties ================
+
+
+================ FILE: build.gradle.kts ================
+
+
+plugins {
+    java
+    id("org.springframework.boot") version "3.5.10"
+    id("io.spring.dependency-management") version "1.1.7"
+}
+
+group = "com.lekhoi"
+version = "0.0.1-SNAPSHOT"
+description = "Smart Warehouse Management System"
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    runtimeOnly("com.mysql:mysql-connector-j")
+
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
+
+    compileOnly("org.projectlombok:lombok")
+    annotationProcessor("org.projectlombok:lombok")
+    testCompileOnly("org.projectlombok:lombok")
+    testAnnotationProcessor("org.projectlombok:lombok")
+
+    implementation("org.mapstruct:mapstruct:1.5.5.Final")
+    annotationProcessor("org.mapstruct:mapstruct-processor:1.5.5.Final")
+    annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
+
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.security:spring-security-test")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
+}
+
+
+================ FILE: HELP.md ================
+
+# Read Me First
+The following was discovered as part of building this project:
+
+* The original package name 'com.lekhoi.smart-warehouse' is invalid and this project uses 'com.lekhoi.smart_warehouse' instead.
+
+# Getting Started
+
+### Reference Documentation
+For further reference, please consider the following sections:
+
+* [Official Gradle documentation](https://docs.gradle.org)
+* [Spring Boot Gradle Plugin Reference Guide](https://docs.spring.io/spring-boot/4.1.1/gradle-plugin)
+* [Create an OCI image](https://docs.spring.io/spring-boot/4.1.1/gradle-plugin/packaging-oci-image.html)
+
+### Additional Links
+These additional references should also help you:
+
+* [Gradle Build Scans â€“ insights for your project's build](https://scans.gradle.com#gradle)
+
+
+
+================ FILE: settings.gradle.kts ================
+
+rootProject.name = "smart-warehouse"
+
+================ FILE: gradle\wrapper\gradle-wrapper.properties ================
+
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.14.4-bin.zip
+networkTimeout=10000
+retries=0
+retryBackOffMs=500
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+
+================ FILE: src\main\java\com\lekhoi\smart_warehouse\SmartWarehouseApplication.java ================
+
+package com.lekhoi.smart_warehouse;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class SmartWarehouseApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(SmartWarehouseApplication.class, args);
+	}
+
+}
+
+
+================ FILE: src\main\java\com\lekhoi\smart_warehouse\config\CorsConfig.java ================
+
+package com.lekhoi.smart_warehouse.config;
+
+import java.util.Arrays;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+@Configuration
+class CorsConfig  {
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000","http://localhost:5173"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS")); 
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept"));
+        configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration); 
+        return source;
+    }
+}
+
+================ FILE: src\main\java\com\lekhoi\smart_warehouse\domain\base\BaseEntity.java ================
+
+package com.lekhoi.smart_warehouse.domain.base;
+
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.MappedSuperclass;
+import lombok.Getter;
+import lombok.Setter;
+
+
+@Getter
+@Setter
+@MappedSuperclass
+public abstract class BaseEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+}
+
+
+================ FILE: src\main\java\com\lekhoi\smart_warehouse\domain\dto\response\RestResponse.java ================
+
+package com.lekhoi.smart_warehouse.domain.dto.response;
+
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+public class RestResponse<T> {
+    private int statusCode;
+    private String error;
+    private Object message;
+    private T data;
+}
+
+
+
+================ FILE: src\main\java\com\lekhoi\smart_warehouse\util\GlobalResponseAdvice.java ================
+
+package com.lekhoi.smart_warehouse.util;
+
+import java.util.Optional;
+
+import org.springframework.core.MethodParameter;
+import org.springframework.http.MediaType;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.http.server.ServletServerHttpResponse;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
+
+import com.lekhoi.smart_warehouse.domain.dto.response.RestResponse;
+import com.lekhoi.smart_warehouse.util.annotation.ApiMessage;
+
+import jakarta.servlet.http.HttpServletResponse;
+
+@ControllerAdvice
+public class GlobalResponseAdvice implements ResponseBodyAdvice<Object>{
+
+    @Override
+    public boolean supports(MethodParameter returnType, Class converterType) {
+        return true;
+    }
+    
+    @Override
+    public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
+            Class selectedConverterType, ServerHttpRequest request, ServerHttpResponse response) {
+                HttpServletResponse httpServletResponse = ((ServletServerHttpResponse)response).getServletResponse();
+                int status = httpServletResponse.getStatus();
+                RestResponse<Object> res = new RestResponse<>();
+                res.setStatusCode(status);
+                if(body instanceof String){
+                    return body;
+                }
+                if(status >= 400){
+                    return body;
+                }else{
+                    String message = Optional.ofNullable(returnType.getMethodAnnotation(ApiMessage.class))
+                                                                    .map(ApiMessage::value)
+                                                                    .orElse("call api success");
+                    res.setMessage(message);
+                    res.setData(body);
+                }
+                return res;
+    }
+}
+
+
+
+================ FILE: src\main\java\com\lekhoi\smart_warehouse\util\annotation\ApiMessage.java ================
+
+package com.lekhoi.smart_warehouse.util.annotation;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+public @interface ApiMessage {
+    String value();
+}
+
+
+================ FILE: src\main\resources\application.properties ================
+
+spring.application.name=smart-warehouse
+
+
+================ FILE: src\test\java\com\lekhoi\smart_warehouse\SmartWarehouseApplicationTests.java ================
+
+package com.lekhoi.smart_warehouse;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class SmartWarehouseApplicationTests {
+
+	@Test
+	void contextLoads() {
+	}
+
+}
+
