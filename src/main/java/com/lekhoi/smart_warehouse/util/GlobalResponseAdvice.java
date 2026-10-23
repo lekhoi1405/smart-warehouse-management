@@ -30,7 +30,7 @@ public class GlobalResponseAdvice implements ResponseBodyAdvice<Object>{
                 int status = httpServletResponse.getStatus();
                 RestResponse<Object> res = new RestResponse<>();
                 res.setStatusCode(status);
-                if(body instanceof String){
+                if(body instanceof String || body instanceof byte[]){
                     return body;
                 }
                 if(status >= 400){
