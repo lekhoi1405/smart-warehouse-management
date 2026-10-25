@@ -23,7 +23,7 @@ import com.lekhoi.smart_warehouse.util.constant.StockLevelEnum;
 import com.lekhoi.smart_warehouse.util.error.ExceptionCustom.IdInvalidException;
 
 @ExtendWith(MockitoExtension.class)
-class Function15To17Test {
+class InventoryServiceTest {
 
     @Mock private InventoryRepository inventoryRepository;
     @InjectMocks private InventoryService inventoryService;

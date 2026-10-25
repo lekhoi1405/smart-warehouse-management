@@ -24,7 +24,7 @@ import com.lekhoi.smart_warehouse.util.error.ExceptionCustom.AlreadyExistsExcept
 import com.lekhoi.smart_warehouse.util.error.ExceptionCustom.IdInvalidException;
 
 @ExtendWith(MockitoExtension.class)
-class Function10To14Test {
+class SupplierServiceTest {
 
     @Mock private SupplierRepository supplierRepository;
     @Mock private SupplierMapper supplierMapper;
