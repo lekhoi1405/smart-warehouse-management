@@ -44,13 +44,13 @@ class LowStockAlertServiceTest {
     @Test
     void synchronizeForProduct_belowThresholdCreatesNewAlert() {
         Product product = product(5);
-        Inventory inventory = inventory(product, 4);
+        Inventory inventory = inventory(product, 3);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory));
         when(alertRepository.findOpenByProductIdForUpdate(1L, LowStockAlertStatusEnum.RESOLVED)).thenReturn(List.of());
 
         lowStockAlertService.synchronizeForProduct(1L);
 
-        verify(alertRepository).save(argThat(alert -> alert.getProduct() == product && alert.getQuantityAtAlert() == 4
+        verify(alertRepository).save(argThat(alert -> alert.getProduct() == product && alert.getQuantityAtAlert() == 3
             && alert.getStatus() == LowStockAlertStatusEnum.NEW));
     }
 
@@ -62,7 +62,10 @@ class LowStockAlertServiceTest {
 
         lowStockAlertService.synchronizeForProduct(1L);
 
-        verify(alertRepository).save(any(LowStockAlert.class));
+        verify(alertRepository).save(argThat(alert -> alert.getProduct() == product
+            && alert.getQuantityAtAlert() == 5
+            && alert.getThresholdAtAlert() == 5
+            && alert.getStatus() == LowStockAlertStatusEnum.NEW));
     }
 
     @Test
@@ -111,9 +114,19 @@ class LowStockAlertServiceTest {
     }
 
     @Test
-    void synchronizeForProduct_negativeQuantityOrThresholdThrows() {
-        Product product = product(-1);
+    void synchronizeForProduct_negativeQuantityThrows() {
+        Product product = product(5);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory(product, -1)));
+
+        assertThrows(IllegalStateException.class, () -> lowStockAlertService.synchronizeForProduct(1L));
+
+        verifyNoInteractions(alertRepository);
+    }
+
+    @Test
+    void synchronizeForProduct_negativeThresholdThrows() {
+        Product product = product(-1);
+        when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory(product, 0)));
 
         assertThrows(IllegalStateException.class, () -> lowStockAlertService.synchronizeForProduct(1L));
 

@@ -75,33 +75,43 @@ class StocktakeServiceTest {
     // FUNCTION 2: StocktakeService.handleConfirmStocktake
     @Test
     void confirmStocktake_actualGreaterThanSystemCreatesPositiveAdjustment() {
-        Stocktake stocktake = stocktake(12, 10);
+        Stocktake stocktake = stocktake(13, 10);
         Inventory inventory = inventory(stocktake.getDetails().get(0).getProduct(), 10);
         stubStocktake(stocktake);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory));
 
-        stocktakeService.handleConfirmStocktake(2L);
+        var response = stocktakeService.handleConfirmStocktake(2L);
 
         ArgumentCaptor<InventoryTransaction> captor = ArgumentCaptor.forClass(InventoryTransaction.class);
         verify(transactionRepository).save(captor.capture());
-        assertEquals(12, inventory.getQuantityOnHand());
-        assertEquals(2, captor.getValue().getQuantityChange());
+        assertEquals(13, inventory.getQuantityOnHand());
+        assertEquals(3, captor.getValue().getQuantityChange());
+        assertEquals(10, captor.getValue().getQuantityBefore());
+        assertEquals(13, captor.getValue().getQuantityAfter());
         assertEquals(InventoryTransactionTypeEnum.ADJUSTMENT, captor.getValue().getTransactionType());
         assertEquals(StocktakeStatusEnum.COMPLETED, stocktake.getStatus());
+        assertEquals(StocktakeStatusEnum.COMPLETED, response.status());
         verify(lowStockAlertService).synchronizeForProduct(1L);
+        verify(stocktakeRepository).flush();
     }
 
     @Test
     void confirmStocktake_actualLessThanSystemCreatesNegativeAdjustment() {
-        Stocktake stocktake = stocktake(8, 10);
+        Stocktake stocktake = stocktake(6, 10);
         Inventory inventory = inventory(stocktake.getDetails().get(0).getProduct(), 10);
         stubStocktake(stocktake);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory));
 
-        stocktakeService.handleConfirmStocktake(2L);
+        var response = stocktakeService.handleConfirmStocktake(2L);
 
-        assertEquals(8, inventory.getQuantityOnHand());
-        verify(transactionRepository).save(argThat(transaction -> transaction.getQuantityChange() == -2 && transaction.getQuantityAfter() == 8));
+        assertEquals(6, inventory.getQuantityOnHand());
+        verify(transactionRepository).save(argThat(transaction -> transaction.getQuantityChange() == -4
+            && transaction.getQuantityBefore() == 10 && transaction.getQuantityAfter() == 6
+            && transaction.getTransactionType() == InventoryTransactionTypeEnum.ADJUSTMENT));
+        assertEquals(StocktakeStatusEnum.COMPLETED, stocktake.getStatus());
+        assertEquals(StocktakeStatusEnum.COMPLETED, response.status());
+        verify(lowStockAlertService).synchronizeForProduct(1L);
+        verify(stocktakeRepository).flush();
     }
 
     @Test
@@ -116,6 +126,7 @@ class StocktakeServiceTest {
         verify(transactionRepository, never()).save(any());
         assertEquals(10, inventory.getQuantityOnHand());
         assertEquals(StocktakeStatusEnum.COMPLETED, stocktake.getStatus());
+        verify(stocktakeRepository).flush();
         verify(lowStockAlertService).synchronizeForProduct(1L);
     }
 
@@ -124,6 +135,8 @@ class StocktakeServiceTest {
         when(stocktakeRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         assertThrows(IdInvalidException.class, () -> stocktakeService.handleConfirmStocktake(99L));
         verifyNoInteractions(inventoryRepository, transactionRepository);
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
@@ -132,7 +145,10 @@ class StocktakeServiceTest {
         stocktake.setStatus(StocktakeStatusEnum.COMPLETED);
         stubStocktake(stocktake);
         assertThrows(IllegalStateException.class, () -> stocktakeService.handleConfirmStocktake(2L));
+        assertEquals(StocktakeStatusEnum.COMPLETED, stocktake.getStatus());
         verifyNoInteractions(inventoryRepository, transactionRepository);
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
@@ -143,7 +159,10 @@ class StocktakeServiceTest {
         stocktake.setDetails(new ArrayList<>());
         stubStocktake(stocktake);
         assertThrows(IllegalStateException.class, () -> stocktakeService.handleConfirmStocktake(2L));
+        assertEquals(StocktakeStatusEnum.DRAFT, stocktake.getStatus());
         verifyNoInteractions(inventoryRepository, transactionRepository);
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
@@ -152,7 +171,10 @@ class StocktakeServiceTest {
         stubStocktake(stocktake);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.empty());
         assertThrows(IdInvalidException.class, () -> stocktakeService.handleConfirmStocktake(2L));
+        assertEquals(StocktakeStatusEnum.DRAFT, stocktake.getStatus());
         verify(transactionRepository, never()).save(any());
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
@@ -162,17 +184,33 @@ class StocktakeServiceTest {
         stubStocktake(stocktake);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory));
         assertThrows(IllegalStateException.class, () -> stocktakeService.handleConfirmStocktake(2L));
+        assertEquals(StocktakeStatusEnum.DRAFT, stocktake.getStatus());
         verify(transactionRepository, never()).save(any());
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
-    void confirmStocktake_negativeInventoryIsRejected() {
-        Stocktake stocktake = stocktake(10, 10);
-        Inventory inventory = inventory(stocktake.getDetails().get(0).getProduct(), -1);
-        stubStocktake(stocktake);
-        when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory));
+    void confirmStocktake_negativeActualOrInventoryIsRejected() {
+        Stocktake negativeInventoryStocktake = stocktake(10, 10);
+        Inventory negativeInventory = inventory(negativeInventoryStocktake.getDetails().get(0).getProduct(), -1);
+        stubStocktake(negativeInventoryStocktake);
+        when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(negativeInventory));
         assertThrows(IllegalStateException.class, () -> stocktakeService.handleConfirmStocktake(2L));
+
+        Stocktake negativeActualStocktake = stocktake(-1, 10);
+        negativeActualStocktake.setId(3L);
+        negativeActualStocktake.getDetails().get(0).getProduct().setId(2L);
+        Inventory validInventory = inventory(negativeActualStocktake.getDetails().get(0).getProduct(), 10);
+        stubStocktake(negativeActualStocktake);
+        when(inventoryRepository.findByProductIdForUpdate(2L)).thenReturn(Optional.of(validInventory));
+        assertThrows(IllegalStateException.class, () -> stocktakeService.handleConfirmStocktake(3L));
+
+        assertEquals(StocktakeStatusEnum.DRAFT, negativeInventoryStocktake.getStatus());
+        assertEquals(StocktakeStatusEnum.DRAFT, negativeActualStocktake.getStatus());
         verify(transactionRepository, never()).save(any());
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
@@ -183,7 +221,10 @@ class StocktakeServiceTest {
         stubStocktake(stocktake);
         when(inventoryRepository.findByProductIdForUpdate(1L)).thenReturn(Optional.of(inventory));
         assertThrows(IllegalStateException.class, () -> stocktakeService.handleConfirmStocktake(2L));
+        assertEquals(StocktakeStatusEnum.DRAFT, stocktake.getStatus());
         verify(transactionRepository, never()).save(any());
+        verify(stocktakeRepository, never()).flush();
+        verifyNoInteractions(lowStockAlertService);
     }
 
     @Test
@@ -194,8 +235,8 @@ class StocktakeServiceTest {
         second.setStocktake(stocktake);
         second.setProduct(secondProduct);
         second.setQuantitySystem(4);
-        second.setQuantityActual(6);
-        second.setQuantityDifference(2);
+        second.setQuantityActual(4);
+        second.setQuantityDifference(0);
         stocktake.getDetails().add(second);
         Inventory firstInventory = inventory(stocktake.getDetails().get(0).getProduct(), 10);
         Inventory secondInventory = inventory(secondProduct, 4);
@@ -206,9 +247,11 @@ class StocktakeServiceTest {
         stocktakeService.handleConfirmStocktake(2L);
 
         assertEquals(12, firstInventory.getQuantityOnHand());
-        assertEquals(6, secondInventory.getQuantityOnHand());
-        verify(transactionRepository, times(2)).save(any(InventoryTransaction.class));
-        verify(lowStockAlertService).synchronizeForProduct(1L);
-        verify(lowStockAlertService).synchronizeForProduct(2L);
+        assertEquals(4, secondInventory.getQuantityOnHand());
+        verify(transactionRepository, times(1)).save(any(InventoryTransaction.class));
+        verify(lowStockAlertService, times(1)).synchronizeForProduct(1L);
+        verify(lowStockAlertService, times(1)).synchronizeForProduct(2L);
+        assertEquals(StocktakeStatusEnum.COMPLETED, stocktake.getStatus());
+        verify(stocktakeRepository).flush();
     }
 }

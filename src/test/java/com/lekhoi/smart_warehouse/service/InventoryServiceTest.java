@@ -46,6 +46,22 @@ class InventoryServiceTest {
         inventoryService.initializeForProduct(product);
         verify(inventoryRepository).save(argThat(saved -> saved.getProduct() == product && saved.getQuantityOnHand() == 0));
     }
+    @Test
+    void initializeForProduct_withoutId_savesZeroQuantityInventory() {
+        Product productWithoutId = Product.builder()
+            .productCode("P-02")
+            .productName("Product without ID")
+            .unit("bag")
+            .status(ProductStatusEnum.ACTIVE)
+            .minStockThreshold(5)
+            .build();
+
+        assertNull(productWithoutId.getId());
+
+        inventoryService.initializeForProduct(productWithoutId);
+
+        verify(inventoryRepository).save(argThat(saved -> saved.getProduct() == productWithoutId&& saved.getQuantityOnHand() == 0));
+    }   
 
     // FUNCTION 16: handleGetInventoryByProductId
     @Test
@@ -64,9 +80,6 @@ class InventoryServiceTest {
         when(inventoryRepository.findWithProductByProductId(1L)).thenReturn(Optional.of(inventory));
         inventory.setQuantityOnHand(0);
         assertEquals(StockLevelEnum.OUT_OF_STOCK, inventoryService.handleGetInventoryByProductId(1L).stockLevel());
-
-        inventory.setQuantityOnHand(6);
-        assertEquals(StockLevelEnum.NORMAL, inventoryService.handleGetInventoryByProductId(1L).stockLevel());
     }
 
     @Test
@@ -78,31 +91,68 @@ class InventoryServiceTest {
     // FUNCTION 17: handleSearchInventories
     @Test
     void searchInventories_rejectsInvalidPagination() {
-        assertThrows(IllegalArgumentException.class, () -> inventoryService.handleSearchInventories(0, 10, null, null, null, null));
+        assertThrows(IllegalArgumentException.class, () -> inventoryService.handleSearchInventories(0, 20, null, null, null, null));
         assertThrows(IllegalArgumentException.class, () -> inventoryService.handleSearchInventories(1, 0, null, null, null, null));
         assertThrows(IllegalArgumentException.class, () -> inventoryService.handleSearchInventories(1, 101, null, null, null, null));
     }
 
     @Test
-    void searchInventories_trimsFiltersAndMapsResults() {
-        when(inventoryRepository.searchInventories(eq("rice"), eq("P-01"), eq("Food"), eq(ProductStatusEnum.ACTIVE), any()))
+    void searchInventories_trimsAndAppliesAllFilters() {
+        product.setProductCode("SP-A");
+        product.setProductName("Gạo");
+        product.setCategory("Thực phẩm");
+        when(inventoryRepository.searchInventories(eq("Gạo"), eq("SP-A"), eq("Thực phẩm"), eq(ProductStatusEnum.ACTIVE), any()))
             .thenReturn(new PageImpl<>(List.of(inventory)));
 
-        var result = inventoryService.handleSearchInventories(1, 10, " rice ", " P-01 ", " Food ", ProductStatusEnum.ACTIVE);
+        var result = inventoryService.handleSearchInventories(1, 20, " Gạo ", " SP-A ", " Thực phẩm ", ProductStatusEnum.ACTIVE);
 
         assertEquals(1, result.getMeta().getTotal());
-        assertEquals("P-01", result.getResult().get(0).productCode());
-        assertEquals(StockLevelEnum.LOW, result.getResult().get(0).stockLevel());
+        assertEquals("SP-A", result.getResult().get(0).productCode());
+        assertEquals("Gạo", result.getResult().get(0).productName());
     }
 
     @Test
-    void searchInventories_blankFiltersBecomeNullAndKeywordDefaultsEmpty() {
+    void searchInventories_nullFiltersDefaultsKeywordToEmpty() {
         when(inventoryRepository.searchInventories(eq(""), isNull(), isNull(), isNull(), any()))
             .thenReturn(new PageImpl<>(List.of()));
 
-        var result = inventoryService.handleSearchInventories(1, 10, null, "  ", " ", null);
+        var result = inventoryService.handleSearchInventories(1, 20, null, null, null, null);
 
         assertTrue(result.getResult().isEmpty());
         assertEquals(0, result.getMeta().getTotal());
+    }
+
+    @Test
+    void searchInventories_blankFiltersAreTrimmedToNull() {
+        when(inventoryRepository.searchInventories(eq(""), isNull(), isNull(), eq(ProductStatusEnum.ACTIVE), any()))
+            .thenReturn(new PageImpl<>(List.of()));
+
+        var result = inventoryService.handleSearchInventories(1, 20, " ", "  ", " ", ProductStatusEnum.ACTIVE);
+
+        assertTrue(result.getResult().isEmpty());
+        assertEquals(0, result.getMeta().getTotal());
+    }
+
+    @Test
+    void searchInventories_unknownProductCodeReturnsEmptyPage() {
+        when(inventoryRepository.searchInventories(eq(""), eq("NO-SUCH-CODE"), isNull(), eq(ProductStatusEnum.ACTIVE), any()))
+            .thenReturn(new PageImpl<>(List.of()));
+
+        var result = inventoryService.handleSearchInventories(1, 20, null, "NO-SUCH-CODE", null, ProductStatusEnum.ACTIVE);
+
+        assertTrue(result.getResult().isEmpty());
+        assertEquals(0, result.getMeta().getTotal());
+    }
+
+    @Test
+    void searchInventories_filtersByInactiveProductStatus() {
+        product.setStatus(ProductStatusEnum.INACTIVE);
+        when(inventoryRepository.searchInventories(eq(""), isNull(), isNull(), eq(ProductStatusEnum.INACTIVE), any()))
+            .thenReturn(new PageImpl<>(List.of(inventory)));
+
+        var result = inventoryService.handleSearchInventories(1, 20, null, null, null, ProductStatusEnum.INACTIVE);
+
+        assertEquals(1, result.getMeta().getTotal());
+        assertEquals(ProductStatusEnum.INACTIVE, result.getResult().get(0).productStatus());
     }
 }

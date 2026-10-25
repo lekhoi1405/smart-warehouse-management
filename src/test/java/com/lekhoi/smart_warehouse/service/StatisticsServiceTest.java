@@ -46,7 +46,8 @@ class StatisticsServiceTest {
     void getMovements_groupsByDayAndTotalsImportsExports() {
         LocalDate day = LocalDate.of(2025, 3, 1);
         Instant createdAt = day.atTime(10, 0).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant();
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of(
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of(
             movement(InventoryTransactionTypeEnum.IMPORT, 5, createdAt),
             movement(InventoryTransactionTypeEnum.EXPORT, -2, createdAt)));
 
@@ -63,7 +64,8 @@ class StatisticsServiceTest {
     void getMovements_groupsDatesByMonth() {
         Instant first = Instant.parse("2025-03-01T03:00:00Z");
         Instant second = Instant.parse("2025-03-20T03:00:00Z");
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of(
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of(
             movement(InventoryTransactionTypeEnum.IMPORT, 4, first),
             movement(InventoryTransactionTypeEnum.IMPORT, 6, second)));
 
@@ -77,7 +79,8 @@ class StatisticsServiceTest {
 
     @Test
     void getMovements_groupsMonthsByYear() {
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of(
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of(
             movement(InventoryTransactionTypeEnum.EXPORT, -3, Instant.parse("2025-01-15T03:00:00Z")),
             movement(InventoryTransactionTypeEnum.EXPORT, -7, Instant.parse("2025-11-15T03:00:00Z"))));
 
@@ -93,10 +96,11 @@ class StatisticsServiceTest {
     void getMovements_sameDayQueriesWholeHalfOpenDayInterval() {
         LocalDate day = LocalDate.of(2025, 4, 1);
         Instant lastMoment = Instant.parse("2025-04-01T16:59:59.999Z");
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of(
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of(
             movement(InventoryTransactionTypeEnum.IMPORT, 1, lastMoment)));
 
-        statisticsService.handleGetMovements(StatisticsGroupEnum.DAY, day, day);
+        var result = statisticsService.handleGetMovements(StatisticsGroupEnum.DAY, day, day);
 
         ArgumentCaptor<Instant> from = ArgumentCaptor.forClass(Instant.class);
         ArgumentCaptor<Instant> to = ArgumentCaptor.forClass(Instant.class);
@@ -104,11 +108,14 @@ class StatisticsServiceTest {
             eq(StockDocumentStatusEnum.COMPLETED), eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT));
         assertEquals(day.atStartOfDay(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant(), from.getValue());
         assertEquals(day.plusDays(1).atStartOfDay(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant(), to.getValue());
+        assertEquals(1, result.totalImported());
+        assertEquals("2025-04-01", result.rows().get(0).period());
     }
 
     @Test
     void getMovements_noTransactionsReturnsEmptyTotals() {
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of());
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of());
 
         var result = statisticsService.handleGetMovements(StatisticsGroupEnum.DAY,
             LocalDate.of(2025, 1, 1), LocalDate.of(2025, 1, 1));
@@ -127,7 +134,8 @@ class StatisticsServiceTest {
 
     @Test
     void getMovements_importWithNonPositiveQuantityChangeRejected() {
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of(
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of(
             movement(InventoryTransactionTypeEnum.IMPORT, 0, Instant.parse("2025-01-01T00:00:00Z"))));
 
         assertThrows(IllegalStateException.class, () -> statisticsService.handleGetMovements(
@@ -136,7 +144,8 @@ class StatisticsServiceTest {
 
     @Test
     void getMovements_exportWithNonNegativeQuantityChangeRejected() {
-        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), any(), any(), any())).thenReturn(List.of(
+        when(transactionRepository.findConfirmedMovementsForReport(any(), any(), eq(StockDocumentStatusEnum.COMPLETED),
+            eq(InventoryTransactionTypeEnum.IMPORT), eq(InventoryTransactionTypeEnum.EXPORT))).thenReturn(List.of(
             movement(InventoryTransactionTypeEnum.EXPORT, 1, Instant.parse("2025-01-01T00:00:00Z"))));
 
         assertThrows(IllegalStateException.class, () -> statisticsService.handleGetMovements(

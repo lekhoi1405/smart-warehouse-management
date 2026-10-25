@@ -315,9 +315,23 @@ class StockDocumentServiceTest {
 
         var response = stockDocumentService.handleCreateDocument(createRequest(StockDocumentTypeEnum.IMPORT, 2L, List.of(detail(1L, 5))));
 
-        assertEquals("DOC-1", response.documentCode()); assertEquals(StockDocumentStatusEnum.DRAFT, response.status());
-        assertEquals(7L, response.createdBy()); assertEquals(2L, response.supplierId());
-        assertEquals(1, response.details().size()); assertEquals(5, response.details().get(0).quantity());
+        ArgumentCaptor<StockDocument> savedCaptor = ArgumentCaptor.forClass(StockDocument.class);
+        verify(documentRepository, times(1)).saveAndFlush(savedCaptor.capture());
+        StockDocument saved = savedCaptor.getValue();
+        assertEquals("DOC-1", saved.getDocumentCode());
+        assertEquals(StockDocumentStatusEnum.DRAFT, saved.getStatus());
+        assertEquals(7L, saved.getCreatedBy());
+        assertSame(supplier, saved.getSupplier());
+        assertEquals(1, saved.getDetails().size());
+        assertSame(product, saved.getDetails().get(0).getProduct());
+        assertSame(saved, saved.getDetails().get(0).getDocument());
+        assertEquals(5, saved.getDetails().get(0).getQuantity());
+        assertEquals("DOC-1", response.documentCode());
+        assertEquals(StockDocumentStatusEnum.DRAFT, response.status());
+        assertEquals(7L, response.createdBy());
+        assertEquals(2L, response.supplierId());
+        assertEquals(1, response.details().size());
+        assertEquals(5, response.details().get(0).quantity());
     }
 
     @Test
@@ -326,7 +340,19 @@ class StockDocumentServiceTest {
         when(documentRepository.existsByDocumentCode("DOC-1")).thenReturn(false);
         when(productRepository.findById(1L)).thenReturn(Optional.of(product));
         when(documentRepository.saveAndFlush(any(StockDocument.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
         var response = stockDocumentService.handleCreateDocument(createRequest(StockDocumentTypeEnum.EXPORT, null, List.of(detail(1L, 2))));
+
+        ArgumentCaptor<StockDocument> savedCaptor = ArgumentCaptor.forClass(StockDocument.class);
+        verify(documentRepository, times(1)).saveAndFlush(savedCaptor.capture());
+        StockDocument saved = savedCaptor.getValue();
+        assertEquals(StockDocumentTypeEnum.EXPORT, saved.getDocumentType());
+        assertNull(saved.getSupplier());
+        assertEquals(StockDocumentStatusEnum.DRAFT, saved.getStatus());
+        assertEquals(7L, saved.getCreatedBy());
+        assertEquals(1, saved.getDetails().size());
+        assertEquals(2, saved.getDetails().get(0).getQuantity());
+
         assertEquals(StockDocumentTypeEnum.EXPORT, response.documentType()); assertNull(response.supplierId());
         assertEquals(StockDocumentStatusEnum.DRAFT, response.status());
     }
@@ -437,28 +463,43 @@ class StockDocumentServiceTest {
     }
 
     @Test
-    void updateDraft_invalidDetailsRejectedWithoutMutation() {
+    void updateDraft_emptyDetailsRejectedWithoutMutation() {
         StockDocument document = existingDraft(); stubExisting(document);
+
         assertThrows(IllegalArgumentException.class, () -> stockDocumentService.handleUpdateDraft(updateRequest(10L, "NEW", List.of())));
-        assertThrows(IllegalArgumentException.class, () -> stockDocumentService.handleUpdateDraft(updateRequest(10L, "NEW", List.of(detail(1L, 0)))));
+
         assertEquals("OLD", document.getDocumentCode());
+        assertTrue(document.getDetails().isEmpty());
+        verify(documentRepository, never()).flush();
     }
 
     @Test
-    void updateDraft_duplicateProductRejected() {
-        StockDocument document = existingDraft(); stubExisting(document); Product product = activeProduct();
-        when(productRepository.findById(1L)).thenReturn(Optional.of(product));
-        assertThrows(IllegalArgumentException.class, () -> stockDocumentService.handleUpdateDraft(updateRequest(10L, "NEW", List.of(detail(1L, 1), detail(1L, 2)))));
+    void updateDraft_nonPositiveDetailQuantityRejectedWithoutFlush() {
+        StockDocument document = existingDraft(); stubExisting(document);
+
+        assertThrows(IllegalArgumentException.class,
+            () -> stockDocumentService.handleUpdateDraft(updateRequest(10L, "NEW", List.of(detail(1L, 0)))));
+
+        assertEquals("OLD", document.getDocumentCode());
+        assertTrue(document.getDetails().isEmpty());
+        verify(documentRepository, never()).flush();
     }
 
     @Test
-    void updateDraft_missingOrInactiveProductRejected() {
-        StockDocument document = existingDraft(); stubExisting(document); when(documentRepository.existsByDocumentCodeAndIdNot("NEW", 10L)).thenReturn(false);
-        when(productRepository.findById(1L)).thenReturn(Optional.empty());
-        assertThrows(IdInvalidException.class, () -> stockDocumentService.handleUpdateDraft(updateRequest(10L, "NEW", List.of(detail(1L, 1)))));
-        Product inactive = activeProduct(); inactive.setStatus(ProductStatusEnum.INACTIVE);
-        when(productRepository.findById(1L)).thenReturn(Optional.of(inactive));
-        assertThrows(IllegalStateException.class, () -> stockDocumentService.handleUpdateDraft(updateRequest(10L, "NEW", List.of(detail(1L, 1)))));
+    void updateDraft_inactiveSupplierRejectedWithoutFlush() {
+        StockDocument document = existingDraft(); stubExisting(document);
+        when(documentRepository.existsByDocumentCodeAndIdNot("NEW", 10L)).thenReturn(false);
+        when(supplierRepository.findById(2L)).thenReturn(Optional.of(supplier(SupplierStatusEnum.INACTIVE)));
+        StockDocumentDTO.UpdateRequest request = new StockDocumentDTO.UpdateRequest(
+            10L, "NEW", StockDocumentTypeEnum.IMPORT, 2L,
+            LocalDate.of(2025, 2, 1), "updated", List.of(detail(1L, 1)));
+
+        assertThrows(IllegalStateException.class, () -> stockDocumentService.handleUpdateDraft(request));
+
+        assertEquals("OLD", document.getDocumentCode());
+        assertTrue(document.getDetails().isEmpty());
+        verify(documentRepository, never()).flush();
+        verifyNoInteractions(productRepository);
     }
 
     // FUNCTION 20: StockDocumentService.handleSubmitDocument
@@ -468,33 +509,82 @@ class StockDocumentServiceTest {
         com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail detail = new com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail();
         detail.setDocument(document); detail.setProduct(product); detail.setQuantity(3); document.getDetails().add(detail); stubExisting(document);
         var response = stockDocumentService.handleSubmitDocument(10L);
-        assertEquals(StockDocumentStatusEnum.PENDING_CHECK, document.getStatus()); assertEquals(StockDocumentStatusEnum.PENDING_CHECK, response.status());
+        assertEquals(StockDocumentStatusEnum.PENDING_CHECK, document.getStatus());
+        assertEquals(StockDocumentStatusEnum.PENDING_CHECK, response.status());
     }
 
     @Test
-    void submitDocument_missingOrWrongStatusRejected() {
+    void submitDocument_missingDocumentThrows() {
         when(documentRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
+
         assertThrows(IdInvalidException.class, () -> stockDocumentService.handleSubmitDocument(99L));
-        StockDocument document = existingDraft(); document.setStatus(StockDocumentStatusEnum.COMPLETED); stubExisting(document);
-        assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(10L));
+
+        verify(documentRepository).findByIdForUpdate(99L);
     }
 
     @Test
-    void submitDocument_emptyDetailsRejected() {
-        StockDocument document = existingDraft(); stubExisting(document);
+    void submitDocument_wrongStatusThrowsWithoutChangingStatus() {
+        StockDocument document = existingDraft();
+        document.setStatus(StockDocumentStatusEnum.COMPLETED);
+        stubExisting(document);
+
         assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(10L));
-        assertEquals(StockDocumentStatusEnum.DRAFT, document.getStatus());
+
+        assertEquals(StockDocumentStatusEnum.COMPLETED, document.getStatus());
     }
 
     @Test
-    void submitDocument_invalidSupplierProductOrQuantityRejected() {
-        Product product = activeProduct(); StockDocument document = existingDraft();
-        document.setDocumentType(StockDocumentTypeEnum.IMPORT); document.setSupplier(null);
-        var detail = new com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail(); detail.setDocument(document); detail.setProduct(product); detail.setQuantity(2); document.getDetails().add(detail); stubExisting(document);
-        assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(10L));
-        document.setDocumentType(StockDocumentTypeEnum.EXPORT); document.setSupplier(null); product.setStatus(ProductStatusEnum.INACTIVE);
-        assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(10L));
-        product.setStatus(ProductStatusEnum.ACTIVE); detail.setQuantity(0);
-        assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(10L));
+    void submitDocument_invalidDetailsSupplierProductOrQuantityRejectedWithoutStatusChange() {
+        StockDocument emptyDocument = existingDraft();
+        StockDocument inactiveSupplierDocument = existingDraft();
+        inactiveSupplierDocument.setId(11L);
+        inactiveSupplierDocument.setDocumentType(StockDocumentTypeEnum.IMPORT);
+        inactiveSupplierDocument.setSupplier(supplier(SupplierStatusEnum.INACTIVE));
+        StockDocument inactiveProductDocument = existingDraft();
+        inactiveProductDocument.setId(12L);
+        StockDocument invalidQuantityDocument = existingDraft();
+        invalidQuantityDocument.setId(13L);
+
+        Product active = activeProduct();
+        Product inactive = activeProduct();
+        inactive.setStatus(ProductStatusEnum.INACTIVE);
+
+        com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail inactiveSupplierDetail =
+            new com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail();
+        inactiveSupplierDetail.setDocument(inactiveSupplierDocument);
+        inactiveSupplierDetail.setProduct(active);
+        inactiveSupplierDetail.setQuantity(2);
+        inactiveSupplierDocument.getDetails().add(inactiveSupplierDetail);
+
+        com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail inactiveProductDetail =
+            new com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail();
+        inactiveProductDetail.setDocument(inactiveProductDocument);
+        inactiveProductDetail.setProduct(inactive);
+        inactiveProductDetail.setQuantity(2);
+        inactiveProductDocument.getDetails().add(inactiveProductDetail);
+
+        com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail invalidQuantityDetail =
+            new com.lekhoi.smart_warehouse.domain.entity.StockDocumentDetail();
+        invalidQuantityDetail.setDocument(invalidQuantityDocument);
+        invalidQuantityDetail.setProduct(active);
+        invalidQuantityDetail.setQuantity(0);
+        invalidQuantityDocument.getDetails().add(invalidQuantityDetail);
+
+        when(documentRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(emptyDocument));
+        when(documentRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(inactiveSupplierDocument));
+        when(documentRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(inactiveProductDocument));
+        when(documentRepository.findByIdForUpdate(13L)).thenReturn(Optional.of(invalidQuantityDocument));
+
+        assertAll(
+            () -> assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(10L)),
+            () -> assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(11L)),
+            () -> assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(12L)),
+            () -> assertThrows(IllegalStateException.class, () -> stockDocumentService.handleSubmitDocument(13L))
+        );
+
+        assertEquals(StockDocumentStatusEnum.DRAFT, emptyDocument.getStatus());
+        assertEquals(StockDocumentStatusEnum.DRAFT, inactiveSupplierDocument.getStatus());
+        assertEquals(StockDocumentStatusEnum.DRAFT, inactiveProductDocument.getStatus());
+        assertEquals(StockDocumentStatusEnum.DRAFT, invalidQuantityDocument.getStatus());
     }
 }
